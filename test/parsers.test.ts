@@ -194,7 +194,7 @@ test('README tab examples parse as written', () => {
   const audioExample = blocks.find((b) => b.includes('audio:') && b.includes('audioStart:'));
   assert.ok(audioExample, 'README has an audio header example');
   const withAudio = parseAsciiTab(`${audioExample}\ne|----|\nB|----|\nG|----|\nD|-2--|\nA|-2--|\nE|-0--|`);
-  assert.equal(withAudio.audio?.path, 'D:\\MUSIX\\song.mp3');
+  assert.equal(withAudio.audio?.path, 'music/song.mp3');
   assert.equal(withAudio.audio?.start, 58.762);
 });
 

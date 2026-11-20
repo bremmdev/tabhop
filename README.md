@@ -4,6 +4,8 @@ Turns a guitar tab into a scrolling practice video with a bouncing ball. Notes s
 
 There is no note detection: the video only shows what to play and when.
 
+![A frame from the video of examples/demo-riff.txt: the ball has just landed on a note, with hammer-on, pull-off and slide badges, long sustained notes and a bend coming up](docs/screenshot.png)
+
 ## Requirements
 
 - Node.js ≥ 23.6 (runs the TypeScript sources directly)
@@ -119,7 +121,7 @@ node src/cli.ts render song.gp4 --audio song.mp3 --sync "2=0.06, 27.25=0:39.107,
 For a text tab you can put the same settings in the header instead of passing flags:
 
 ```
-audio: D:\MUSIX\song.mp3        # relative paths are relative to the tab file
+audio: music/song.mp3           # relative paths are relative to the tab file
 audioStart: 58.762
 ```
 
@@ -185,12 +187,3 @@ Tabs of existing songs and their recordings are usually protected by copyright: 
 Keep your own song files in `tabs/`. That folder, and common audio formats, are in `.gitignore` so they're never committed.
 
 tabhop is an independent project. It isn't affiliated with or endorsed by any guitar-learning app or tab site.
-
-## Development
-
-```sh
-npm test           # parser / timing tests
-npm run typecheck
-```
-
-Code map: `src/parsers/*` (tab → `Song`), `src/fingering.ts`, `src/chords.ts`, `src/layout.ts` (geometry + ball trajectory), `src/render/renderer.ts` (draws one frame), `src/video.ts` (parallel frame rendering → ffmpeg), `src/sync.ts` (re-timing to a recording), `src/audio.ts` + `src/autosync.ts` + `src/syncCommand.ts` (`tabhop sync`), `src/syncFile.ts` (the saved `.sync.txt`).
