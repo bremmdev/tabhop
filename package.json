@@ -1,0 +1,30 @@
+{
+  "name": "tabhop",
+  "version": "1.0.0",
+  "description": "Turn guitar tabs into scrolling bouncing-ball practice videos",
+  "scripts": {
+    "render": "node src/cli.ts render",
+    "frame": "node src/cli.ts frame",
+    "info": "node src/cli.ts info",
+    "typecheck": "tsc -p .",
+    "test": "node --test \"test/**/*.test.ts\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@coderline/alphatab": "^1.9.0",
+    "@napi-rs/canvas": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
+  },
+  "bin": {
+    "tabhop": "src/cli.ts"
+  },
+  "engines": {
+    "node": ">=23.6"
+  }
+}

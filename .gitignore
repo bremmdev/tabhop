@@ -1,0 +1,15 @@
+node_modules/
+out/
+in/
+*.part*.mp4
+*.parts.txt
+
+tabs/
+*.sync.txt
+*.sync.txt.bak
+*.mp3
+*.wav
+*.flac
+*.ogg
+*.m4a
+*.aac
