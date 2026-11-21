@@ -10,7 +10,7 @@ import { parseSyncPoints, syncToAudio, type SyncPoint, type SyncSegment } from '
 import { syncCommand } from './syncCommand.ts';
 import { clock, parseSyncFile, samePath, syncFilePath } from './syncFile.ts';
 import { NOTE_SHAPES, type NoteShape } from './render/renderer.ts';
-import { renderPng, renderVideo, type VideoOptions } from './video.ts';
+import { renderPng, renderVideo, stopRenders, type VideoOptions } from './video.ts';
 
 const HELP = `tabhop — turn a guitar tab into a scrolling practice video
 
@@ -312,6 +312,19 @@ if (command === 'info') {
   const workers = workerCount ?? Math.max(1, Math.min(8, Math.floor(availableParallelism() / 3)));
   if (hint) console.warn(`Note: ${hint}\n`);
   if (sync) console.log(`${sync}\n`);
+  // Ctrl-C: stop cleanly instead of leaving half-written files behind. A second Ctrl-C quits at once.
+  let stopping: Promise<never> | undefined;
+  const stop = () => {
+    stopping ??= (async () => {
+      process.stdout.write('\nStopping ...\n');
+      const left = await stopRenders();
+      if (left.length) console.error(`Could not remove these unfinished files:\n  ${left.join('\n  ')}`);
+      else console.log('Stopped: removed the unfinished files.');
+      process.exit(130);
+    })();
+  };
+  process.once('SIGINT', stop);
+  process.once('SIGTERM', stop);
   const single = speeds.length === 1 && values.out && extname(values.out).toLowerCase() === '.mp4';
   for (const pct of speeds) {
     const suffix = values.bars ? ` (bars ${values.bars})` : '';
@@ -329,6 +342,8 @@ if (command === 'info') {
         process.stdout.write(`\r  ${((done / total) * 100).toFixed(0).padStart(3)}%  frame ${done}/${total}  ${fps.toFixed(0)} fps   `);
       });
     } catch (e) {
+      // Stopping makes the render fail; let the cleanup finish and exit instead of reporting that.
+      if (stopping) await stopping;
       process.stdout.write('\n');
       fail((e as Error).message);
     }

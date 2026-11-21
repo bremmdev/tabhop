@@ -1,7 +1,7 @@
 import { createCanvas } from '@napi-rs/canvas';
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { buildTimeline, makeGeometry } from './layout.ts';
@@ -18,6 +18,65 @@ export interface VideoOptions {
   crf: number;
   encoder: string; // e.g. libx264, h264_nvenc
   noteShape?: NoteShape;
+}
+
+/**
+ * What the renders in progress have open, so an interrupted render (Ctrl-C) can
+ * stop and clean up after itself: see `stopRenders`.
+ */
+const running = {
+  files: new Set<string>(),
+  workers: new Set<Worker>(),
+  ffmpeg: new Set<ChildProcess>(),
+};
+
+/** Registers a file the render writes and removes again; returns the path. */
+function tempFile(path: string): string {
+  running.files.add(path);
+  return path;
+}
+
+function removeTemp(path: string): void {
+  rmSync(path, { force: true });
+  running.files.delete(path);
+}
+
+/** Registers an ffmpeg process; returns it. */
+function tracked<T extends ChildProcess>(child: T): T {
+  running.ffmpeg.add(child);
+  child.on('close', () => running.ffmpeg.delete(child));
+  return child;
+}
+
+/**
+ * Stops the renders in progress and deletes their unfinished files. A video that
+ * was already there is left alone: renders only replace it once they've finished.
+ * Returns the files that couldn't be deleted.
+ */
+export async function stopRenders(): Promise<string[]> {
+  // A terminated worker closes its ffmpeg's input, so that ffmpeg finishes and exits too.
+  await Promise.all([...running.workers].map((w) => w.terminate()));
+  const children = [...running.ffmpeg].filter((c) => c.exitCode === null && c.signalCode === null);
+  for (const c of children) c.kill();
+  await Promise.all(children.map((c) => once(c, 'close')));
+  const left: string[] = [];
+  for (const path of running.files) {
+    // Windows keeps a file locked until the process writing it has gone, which can take a moment.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        rmSync(path, { force: true });
+        break;
+      } catch {
+        if (attempt === 50) {
+          left.push(path);
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
+  }
+  running.files.clear();
+  return left;
 }
 
 export function prepare(song: Song, opts: VideoOptions) {
@@ -57,16 +116,18 @@ export async function renderFrames(
   const canvas = createCanvas(opts.width, opts.height);
   const ctx = canvas.getContext('2d');
 
-  const ff = spawn(
-    'ffmpeg',
-    [
-      '-hide_banner', '-loglevel', 'error', '-y',
-      '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', `${opts.width}x${opts.height}`, '-r', String(opts.fps), '-i', '-',
-      ...encoderArgs(opts.encoder, opts.crf),
-      '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
-      outPath,
-    ],
-    { stdio: ['pipe', 'ignore', 'pipe'] },
+  const ff = tracked(
+    spawn(
+      'ffmpeg',
+      [
+        '-hide_banner', '-loglevel', 'error', '-y',
+        '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', `${opts.width}x${opts.height}`, '-r', String(opts.fps), '-i', '-',
+        ...encoderArgs(opts.encoder, opts.crf),
+        '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
+        outPath,
+      ],
+      { stdio: ['pipe', 'ignore', 'pipe'] },
+    ),
   );
   let stderr = '';
   ff.stderr.on('data', (d) => (stderr += d));
@@ -92,6 +153,8 @@ export async function renderFrames(
 
 /**
  * Renders the whole video, then adds the backing track if the song has one.
+ * It's made under a temporary name and only replaces `outPath` once finished,
+ * so an interrupted render never leaves a broken video (or deletes a good one).
  */
 export async function renderVideo(
   song: Song,
@@ -100,14 +163,26 @@ export async function renderVideo(
   workers: number,
   onProgress?: (done: number, total: number) => void,
 ): Promise<void> {
-  if (!song.audio) return renderSilentVideo(song, opts, outPath, workers, onProgress);
-  if (!existsSync(song.audio.path)) throw new Error(`Audio file not found: ${song.audio.path}`);
-  const silent = `${outPath}.video.mp4`;
+  if (song.audio && !existsSync(song.audio.path)) throw new Error(`Audio file not found: ${song.audio.path}`);
+  const partial = tempFile(`${outPath}.partial.mp4`);
   try {
-    await renderSilentVideo(song, opts, silent, workers, onProgress);
-    await muxAudio(song, opts, silent, outPath);
+    if (!song.audio) await renderSilentVideo(song, opts, partial, workers, onProgress);
+    else {
+      const silent = tempFile(`${outPath}.video.mp4`);
+      try {
+        await renderSilentVideo(song, opts, silent, workers, onProgress);
+        await muxAudio(song, opts, silent, partial);
+      } finally {
+        removeTemp(silent);
+      }
+    }
+    try {
+      renameSync(partial, outPath);
+    } catch (e) {
+      throw new Error(`Could not replace ${outPath} (is it open in a video player?): ${(e as Error).message}`);
+    }
   } finally {
-    rmSync(silent, { force: true });
+    removeTemp(partial);
   }
 }
 
@@ -155,7 +230,7 @@ async function muxAudio(song: Song, opts: VideoOptions, videoPath: string, outPa
     '-movflags', '+faststart',
     outPath,
   ];
-  const ff = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+  const ff = tracked(spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] }));
   let stderr = '';
   ff.stderr.on('data', (d) => (stderr += d));
   const [code] = await once(ff, 'close');
@@ -183,16 +258,20 @@ async function renderSilentVideo(
   }
 
   const parts: string[] = [];
+  const pool: Worker[] = [];
   const progress = new Array<number>(chunks).fill(0);
   const jobs: Promise<void>[] = [];
   for (let k = 0; k < chunks; k++) {
     const from = Math.floor((total * k) / chunks);
     const to = Math.floor((total * (k + 1)) / chunks);
-    const part = `${outPath}.part${k}.mp4`;
+    const part = tempFile(`${outPath}.part${k}.mp4`);
     parts.push(part);
     const worker = new Worker(new URL('./worker.ts', import.meta.url), {
       workerData: { song, opts, from, to, out: part },
     });
+    pool.push(worker);
+    running.workers.add(worker);
+    worker.on('exit', () => running.workers.delete(worker));
     jobs.push(
       new Promise<void>((resolve, reject) => {
         worker.on('message', (m: { done?: number; finished?: boolean }) => {
@@ -209,15 +288,17 @@ async function renderSilentVideo(
   }
   try {
     await Promise.all(jobs);
-    const list = `${outPath}.parts.txt`;
+    const list = tempFile(`${outPath}.parts.txt`);
     writeFileSync(list, parts.map((p) => `file '${resolvePath(p).replace(/'/g, String.raw`'\''`)}'`).join('\n'));
-    const ff = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', '-movflags', '+faststart', outPath], { stdio: ['ignore', 'ignore', 'pipe'] });
+    const ff = tracked(spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', '-movflags', '+faststart', outPath], { stdio: ['ignore', 'ignore', 'pipe'] }));
     let stderr = '';
     ff.stderr.on('data', (d) => (stderr += d));
     const [code] = await once(ff, 'close');
-    rmSync(list, { force: true });
+    removeTemp(list);
     if (code !== 0) throw new Error(`Joining video parts failed:\n${stderr}`);
   } finally {
-    for (const p of parts) rmSync(p, { force: true });
+    // If one worker failed, stop the others rather than let them write parts that are about to be deleted.
+    await Promise.all(pool.map((w) => w.terminate()));
+    for (const p of parts) removeTemp(p);
   }
 }

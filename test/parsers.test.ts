@@ -65,6 +65,21 @@ E|----|------|`);
   assert.deepEqual(song.notes.map((n) => n.time), [0, 1, 2, 3, 4]);
 });
 
+test('ASCII: a note rings for at most a bar of the time signature it is in', () => {
+  const strings = (bar: (s: string) => string) => ['e', 'B', 'G', 'D', 'A', 'E'].map((s) => `${s}|${bar(s)}|`).join('\n');
+  const song = parseAsciiTab(`bpm: 60
+${strings((s) => (s === 'E' ? '-0--------------' : '----------------'))}
+time: 7/4
+${strings((s) => (s === 'E' ? '-0--------------------------' : '----------------------------'))}
+time: 2/4
+${strings((s) => (s === 'E' ? '-0------' : '--------'))}
+
+${strings((s) => (s === 'E' ? '-------0' : '--------'))}`);
+  // 60 bpm: a beat is 1 s. The 7/4 note rings for its whole bar (not the first bar's 4 beats),
+  // and the 2/4 note stops at the end of its bar, before the next note 3.5 beats later.
+  assert.deepEqual(song.notes.map((n) => [n.time, n.duration]), [[0, 4], [4, 7], [11, 2], [14.5, 0.5]]);
+});
+
 test('ASCII: grid timing labels chords on every pass of a repeat', () => {
   const song = parseAsciiTab(`bpm: 60
 grid: 4

@@ -434,7 +434,8 @@ export function parseAsciiTab(text: string): Song {
   const beats: number[] = [];
   const sections: Marker[] = [];
   const chords: Marker[] = [];
-  const raw: (TabEvent & { beat: number })[] = [];
+  /** `barBeats`: the length of a bar where the note is, the longest it can ring. */
+  const raw: (TabEvent & { beat: number; barBeats: number })[] = [];
 
   for (const sys of systems) {
     cur = { ...cur, ...sys.changes };
@@ -454,7 +455,7 @@ export function parseAsciiTab(text: string): Song {
           bars.push(barStart);
           const segBeats = (seg.end - seg.start) / cur.grid;
           for (let b = 0; b < segBeats - 1e-6; b++) beats.push(barStart + b);
-          for (const ev of seg.events) raw.push({ ...ev, beat: colBeat(seg, ev.col) });
+          for (const ev of seg.events) raw.push({ ...ev, beat: colBeat(seg, ev.col), barBeats: beatsPerBar });
           for (const ch of sys.chords) {
             if (ch.col >= seg.start && ch.col < seg.end) chords.push({ time: colBeat(seg, ch.col), text: ch.text });
           }
@@ -474,7 +475,7 @@ export function parseAsciiTab(text: string): Song {
           if (toBeat(lastCol, cpb) >= beatsPerBar) cpb = width / beatsPerBar; // spacing too irregular: fall back to proportional
           bars.push(beat);
           for (let b = 0; b < beatsPerBar; b++) beats.push(beat + b);
-          for (const ev of seg.events) raw.push({ ...ev, beat: beat + Math.min(beatsPerBar - step, toBeat(ev.col, cpb)) });
+          for (const ev of seg.events) raw.push({ ...ev, beat: beat + Math.min(beatsPerBar - step, toBeat(ev.col, cpb)), barBeats: beatsPerBar });
           for (const ch of sys.chords) {
             if (ch.col >= seg.start - 1 && ch.col < seg.end) {
               chords.push({ time: beat + Math.min(beatsPerBar - step, toBeat(Math.max(ch.col, seg.start), cpb)), text: ch.text });
@@ -492,7 +493,7 @@ export function parseAsciiTab(text: string): Song {
   const onsets = [...new Set(raw.map((e) => e.beat))].sort((a, b) => a - b);
   const notes: Note[] = raw.map((e) => {
     const nextOnset = onsets.find((o) => o > e.beat + 1e-6) ?? endBeat;
-    const endBeatOfNote = Math.min(nextOnset, e.beat + settings.beatsPerBar);
+    const endBeatOfNote = Math.min(nextOnset, e.beat + e.barBeats);
     const time = tempo.toSeconds(e.beat);
     const note: Note = {
       time,

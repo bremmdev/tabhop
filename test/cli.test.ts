@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { parseCliArgs } from '../src/args.ts';
 import { loadSong } from '../src/load.ts';
@@ -17,6 +17,8 @@ function run(...args: string[]) {
   const r = spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8' });
   return { code: r.status, stdout: r.stdout, stderr: r.stderr };
 }
+
+const hasFfmpeg = !spawnSync('ffmpeg', ['-version']).error;
 
 test('args: a negative value after an option is that option\'s value', () => {
   assert.equal(parseCliArgs(['render', 'a.txt', '--audio-start', '-1.548']).values['audio-start'], '-1.548');
@@ -73,6 +75,47 @@ test('cli: number options are checked up front, with the option and value in the
 test('cli: --track past the last track says which tracks there are', () => {
   const lead = fileURLToPath(new URL('../examples/demo-lead.atex', import.meta.url));
   assert.match(run('info', lead, '--track', '7').stderr, /^Error: There is no track 7: this file has track 0 \(see "info"\)/);
+});
+
+test('cli: Ctrl-C during a render removes its unfinished files and keeps the previous video', { skip: !hasFfmpeg && 'needs ffmpeg' }, () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tabhop-'));
+  try {
+    // Windows can't send a real SIGINT to a child process, so the CLI raises it itself once the render is under way.
+    const preload = join(dir, 'interrupt.mjs');
+    writeFileSync(preload, `
+      const write = process.stdout.write.bind(process.stdout);
+      let sent = false;
+      process.stdout.write = (chunk, ...rest) => {
+        if (!sent && /frame \\d+\\//.test(String(chunk))) {
+          sent = true;
+          setImmediate(() => process.emit('SIGINT'));
+        }
+        return write(chunk, ...rest);
+      };`);
+    const out = join(dir, 'video.mp4');
+    writeFileSync(out, 'the previous render');
+    const r = spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, CLI, 'render', DEMO, '--size', '640x360', '--workers', '2', '-o', out], { encoding: 'utf8' });
+    assert.equal(r.status, 130, r.stderr);
+    assert.match(r.stdout, /Stopped: removed the unfinished files/);
+    assert.deepEqual(readdirSync(dir).sort(), ['interrupt.mjs', 'video.mp4']);
+    assert.equal(readFileSync(out, 'utf8'), 'the previous render');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('cli: a finished render replaces the previous video', { skip: !hasFfmpeg && 'needs ffmpeg' }, () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tabhop-'));
+  try {
+    const out = join(dir, 'video.mp4');
+    writeFileSync(out, 'the previous render');
+    const r = run('render', DEMO, '--bars', '1-1', '--size', '320x180', '-o', out);
+    assert.equal(r.code, 0, r.stderr);
+    assert.deepEqual(readdirSync(dir), ['video.mp4']);
+    assert.equal(readFileSync(out).subarray(4, 8).toString(), 'ftyp');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('cli: frame --at takes seconds or m:ss', () => {
@@ -134,7 +177,6 @@ test('cli: --sync needs audio and replaces --audio-start', () => {
   assert.match(run('info', DEMO, '--audio', 'a.mp3', '--sync', '1=0,99=10').stderr, /^Error: --sync: Song only has \d+ bars/);
 });
 
-const hasFfmpeg = !spawnSync('ffmpeg', ['-version']).error;
 
 /** A 16-bit mono WAV file. */
 function wav(samples: Float32Array, rate: number): Buffer {
