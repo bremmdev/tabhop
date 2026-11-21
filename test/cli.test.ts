@@ -49,6 +49,48 @@ test('cli: bad options give a one-line error, not a stack trace', () => {
   }
 });
 
+test('cli: number options are checked up front, with the option and value in the error', () => {
+  const cases: [string[], RegExp][] = [
+    [['render', DEMO, '--fps', 'abc'], /^Error: --fps must be a number above 0, got "abc"/],
+    [['render', DEMO, '--fps', '0'], /^Error: --fps must be a number above 0, got "0"/],
+    [['render', DEMO, '--zoom', '0'], /^Error: --zoom must be a number above 0, got "0"/],
+    [['render', DEMO, '--zoom', ''], /^Error: --zoom must be a number above 0, got ""/],
+    [['render', DEMO, '--count-in', '1.5'], /^Error: --count-in must be a whole number of 0 or more, got "1\.5"/],
+    [['render', DEMO, '--count-in', '-1'], /^Error: --count-in must be a whole number of 0 or more, got "-1"/],
+    [['render', DEMO, '--crf', '60'], /^Error: --crf must be a number from 0 to 51, got "60"/],
+    [['render', DEMO, '--workers', '0'], /^Error: --workers must be a whole number of 1 or more, got "0"/],
+    [['info', DEMO, '--track', 'lead'], /^Error: --track must be a whole number of 0 or more, got "lead"/],
+    [['frame', DEMO, '--at', 'abc'], /^Error: --at: Invalid time "abc"/],
+    [['frame', DEMO, '--at', '1', '--speed', '0'], /^Error: --speed values must be percentages between 1 and 200/],
+  ];
+  for (const [args, error] of cases) {
+    const r = run(...args);
+    assert.equal(r.code, 1, `${args.join(' ')} should fail`);
+    assert.match(r.stderr, error);
+  }
+});
+
+test('cli: --track past the last track says which tracks there are', () => {
+  const lead = fileURLToPath(new URL('../examples/demo-lead.atex', import.meta.url));
+  assert.match(run('info', lead, '--track', '7').stderr, /^Error: There is no track 7: this file has track 0 \(see "info"\)/);
+});
+
+test('cli: frame --at takes seconds or m:ss', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tabhop-'));
+  try {
+    const frame = (at: string) => {
+      const out = join(dir, `${at.replace(':', '-')}.png`);
+      const r = run('frame', DEMO, '--at', at, '--size', '320x180', '-o', out);
+      assert.equal(r.code, 0, r.stderr);
+      return readFileSync(out);
+    };
+    assert.ok(frame('0:01.5').equals(frame('1.5')), '0:01.5 is the same frame as 1.5');
+    assert.ok(!frame('1.5').equals(frame('3')), 'a different time is a different frame');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('cli: info reports a silent first bar and how to line up the audio', () => {
   const dir = mkdtempSync(join(tmpdir(), 'tabhop-'));
   try {

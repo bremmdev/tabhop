@@ -455,10 +455,8 @@ export function parseAsciiTab(text: string): Song {
           const segBeats = (seg.end - seg.start) / cur.grid;
           for (let b = 0; b < segBeats - 1e-6; b++) beats.push(barStart + b);
           for (const ev of seg.events) raw.push({ ...ev, beat: colBeat(seg, ev.col) });
-          if (r === 0) {
-            for (const ch of sys.chords) {
-              if (ch.col >= seg.start && ch.col < seg.end) chords.push({ time: colBeat(seg, ch.col), text: ch.text });
-            }
+          for (const ch of sys.chords) {
+            if (ch.col >= seg.start && ch.col < seg.end) chords.push({ time: colBeat(seg, ch.col), text: ch.text });
           }
           colOffset += seg.end - seg.start;
         }
@@ -477,11 +475,9 @@ export function parseAsciiTab(text: string): Song {
           bars.push(beat);
           for (let b = 0; b < beatsPerBar; b++) beats.push(beat + b);
           for (const ev of seg.events) raw.push({ ...ev, beat: beat + Math.min(beatsPerBar - step, toBeat(ev.col, cpb)) });
-          if (r === 0) {
-            for (const ch of sys.chords) {
-              if (ch.col >= seg.start - 1 && ch.col < seg.end) {
-                chords.push({ time: beat + Math.min(beatsPerBar - step, toBeat(Math.max(ch.col, seg.start), cpb)), text: ch.text });
-              }
+          for (const ch of sys.chords) {
+            if (ch.col >= seg.start - 1 && ch.col < seg.end) {
+              chords.push({ time: beat + Math.min(beatsPerBar - step, toBeat(Math.max(ch.col, seg.start), cpb)), text: ch.text });
             }
           }
           beat += beatsPerBar;

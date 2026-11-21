@@ -72,17 +72,61 @@ if (values.help || !command) {
 }
 if (!file) fail(`Missing <tab-file>.\n\n${HELP}`);
 
+interface Range {
+  integer?: boolean;
+  /** Inclusive. */
+  min?: number;
+  /** Exclusive. */
+  above?: number;
+  max?: number;
+}
+
+function describeRange({ integer, min, above, max }: Range): string {
+  const kind = integer ? 'a whole number' : 'a number';
+  if (min !== undefined && max !== undefined) return `${kind} from ${min} to ${max}`;
+  if (above !== undefined) return `${kind} above ${above}`;
+  return min !== undefined ? `${kind} of ${min} or more` : kind;
+}
+
+/** A number option, checked here so a typo fails with a clear message instead of deep inside the render. */
+function numberOption(name: string, raw: string, range: Range): number {
+  const n = /^\s*[-+]?(?:\d+\.?\d*|\.\d+)\s*$/.test(raw) ? Number(raw) : NaN;
+  const ok =
+    Number.isFinite(n) &&
+    (!range.integer || Number.isInteger(n)) &&
+    (range.min === undefined || n >= range.min) &&
+    (range.above === undefined || n > range.above) &&
+    (range.max === undefined || n <= range.max);
+  if (!ok) fail(`--${name} must be ${describeRange(range)}, got "${raw}"`);
+  return n;
+}
+
 const sizeMatch = /^(\d+)x(\d+)$/.exec(values.size);
 if (!sizeMatch) fail('--size must look like 1920x1080');
 const width = Number(sizeMatch[1]);
 const height = Number(sizeMatch[2]);
 if (width % 2 || height % 2) fail('--size width and height must be even numbers');
 
+const fps = numberOption('fps', values.fps, { above: 0 });
+const zoom = numberOption('zoom', values.zoom, { above: 0 });
+const countIn = numberOption('count-in', values['count-in'], { integer: true, min: 0 });
+const crf = numberOption('crf', values.crf, { min: 0, max: 51 });
+const workerCount = values.workers === undefined ? undefined : numberOption('workers', values.workers, { integer: true, min: 1 });
+const trackIndex = values.track === undefined ? undefined : numberOption('track', values.track, { integer: true, min: 0 });
+const speeds = values.speed.split(',').map((s) => Number(s.trim().replace('%', '')));
+if (speeds.some((s) => !(s > 0 && s <= 200))) fail('--speed values must be percentages between 1 and 200');
+let at: number | undefined;
+try {
+  if (values.at !== undefined) at = parseTime(values.at);
+} catch (e) {
+  fail(`--at: ${(e as Error).message}`);
+}
+
 let song: Song;
 let tracks: string[] | undefined;
 try {
   ({ song, tracks } = loadSong(file, {
-    track: values.track !== undefined ? Number(values.track) : undefined,
+    track: trackIndex,
     autoChords: !values['no-chords'],
   }));
 } catch (e) {
@@ -222,12 +266,12 @@ const noteShape = values['note-shape'] as NoteShape;
 if (!NOTE_SHAPES.includes(noteShape)) fail(`--note-shape must be one of: ${NOTE_SHAPES.join(', ')}`);
 
 const baseOpts: Omit<VideoOptions, 'speed'> = {
-  fps: Number(values.fps),
+  fps,
   width,
   height,
-  zoom: Number(values.zoom),
-  countInBars: Number(values['count-in']),
-  crf: Number(values.crf),
+  zoom,
+  countInBars: countIn,
+  crf,
   encoder: values.encoder,
   noteShape,
 };
@@ -258,17 +302,14 @@ if (command === 'info') {
     console.log(`  ${n.time.toFixed(3).padStart(8)}  s${n.string + 1}  fret ${String(n.fret).padStart(2)}  f${n.finger}  ${extra}`);
   }
 } else if (command === 'frame') {
-  if (values.at === undefined) fail('frame needs --at <seconds>');
-  const out = values.out ?? join('out', `${safeName(basename(file, extname(file)))}-frame-${values.at}.png`);
+  if (at === undefined) fail('frame needs --at <seconds>');
+  const out = values.out ?? join('out', `${safeName(basename(file, extname(file)))}-frame-${Number(at.toFixed(3))}.png`);
   mkdirSync(dirname(out), { recursive: true });
-  const speed = Number(values.speed.split(',')[0]) / 100;
-  writeFileSync(out, await renderPng(song, { ...baseOpts, speed }, Number(values.at)));
+  writeFileSync(out, await renderPng(song, { ...baseOpts, speed: speeds[0] / 100 }, at));
   console.log(`Wrote ${out}`);
 } else if (command === 'render') {
-  const speeds = values.speed.split(',').map((s) => Number(s.trim().replace('%', '')));
-  if (speeds.some((s) => !(s > 0 && s <= 200))) fail('--speed values must be percentages between 1 and 200');
   const songName = safeName(song.artist ? `${song.artist} - ${song.title}` : song.title);
-  const workers = values.workers ? Number(values.workers) : Math.max(1, Math.min(8, Math.floor(availableParallelism() / 3)));
+  const workers = workerCount ?? Math.max(1, Math.min(8, Math.floor(availableParallelism() / 3)));
   if (hint) console.warn(`Note: ${hint}\n`);
   if (sync) console.log(`${sync}\n`);
   const single = speeds.length === 1 && values.out && extname(values.out).toLowerCase() === '.mp4';

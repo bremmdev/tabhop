@@ -45,8 +45,9 @@ test('ASCII: real-world tab with drop-D labels, chord line, repeat and pull-off'
   assert.deepEqual(song.tuning, [62, 57, 53, 48, 43, 38]);
   assert.equal(song.bars.length, 2 * 2 + 1); // two bars repeated twice + one bar
   assert.equal(song.sections[0].text, 'Verse');
-  assert.deepEqual(song.chords.map((c) => c.text), ['D5', 'F5']);
-  assert.equal(song.chords[1].time, song.bars[1]);
+  // The chord line is labelled on every pass of the repeat, not just the first.
+  assert.deepEqual(song.chords.map((c) => c.text), ['D5', 'F5', 'D5', 'F5']);
+  assert.deepEqual(song.chords.map((c) => c.time), song.bars.slice(0, 4));
   const pull = song.notes.find((n) => n.technique === 'pull');
   assert.equal(pull?.fret, 12);
   assert.equal(pull?.string, 1);
@@ -62,6 +63,20 @@ D|----|------|
 A|----|------|
 E|----|------|`);
   assert.deepEqual(song.notes.map((n) => n.time), [0, 1, 2, 3, 4]);
+});
+
+test('ASCII: grid timing labels chords on every pass of a repeat', () => {
+  const song = parseAsciiTab(`bpm: 60
+grid: 4
+  E5   G5
+e|----|----| x2
+B|----|----|
+G|----|----|
+D|2---|5---|
+A|2---|5---|
+E|0---|3---|`);
+  assert.deepEqual(song.chords.map((c) => c.text), ['E5', 'G5', 'E5', 'G5']);
+  assert.deepEqual(song.chords.map((c) => c.time), [0, 1, 2, 3]);
 });
 
 test('chord naming', () => {
@@ -188,7 +203,7 @@ test('README tab examples parse as written', () => {
   const song = parseAsciiTab(tabExample);
   assert.deepEqual(song.tuning, [64, 59, 55, 50, 45, 40]);
   assert.equal(song.bars.length, 4); // 2 bars, x2
-  assert.deepEqual(song.chords.map((c) => c.text), ['E5', 'G5']);
+  assert.deepEqual(song.chords.map((c) => c.text), ['E5', 'G5', 'E5', 'G5']);
   assert.ok(song.notes.some((n) => n.palmMute));
 
   const audioExample = blocks.find((b) => b.includes('audio:') && b.includes('audioStart:'));

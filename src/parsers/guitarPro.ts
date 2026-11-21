@@ -81,6 +81,11 @@ export function playbackOrder(score: Score): number[] {
 }
 
 export function scoreToSong(score: Score, trackIndex?: number): Song {
+  const count = score.tracks.length;
+  if (trackIndex !== undefined && (trackIndex < 0 || trackIndex >= count)) {
+    const which = count === 1 ? 'track 0' : `tracks 0-${count - 1}`;
+    throw new Error(`There is no track ${trackIndex}: this file has ${which} (see "info")`);
+  }
   const track =
     trackIndex !== undefined ? score.tracks[trackIndex] : score.tracks.find(isGuitarTrack);
   if (!track) throw new Error('No guitar track found in file');
