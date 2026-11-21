@@ -238,7 +238,9 @@ test('cli: sync finds the sync points and render/info pick them up', { skip: !ha
     assert.match(r.stdout, /bars 1-16 +4\.0% faster +14 of 14 cymbals heard/);
     assert.match(r.stdout, /Saved to .*drums\.atex\.sync\.txt/);
 
-    const saved = parseSyncFile(readFileSync(`${tab}.sync.txt`, 'utf8'));
+    const savedText = readFileSync(`${tab}.sync.txt`, 'utf8');
+    assert.match(savedText, /^audio: drums\.wav$/m, 'a recording next to the tab is saved relative to it');
+    const saved = parseSyncFile(savedText, `${tab}.sync.txt`);
     assert.ok(samePath(saved.audio!, audio));
     const song = loadSong(tab).song;
     for (const p of saved.points) {
@@ -269,6 +271,37 @@ test('cli: sync explains what it needs', () => {
   const r = run('sync', DEMO, '--audio', 'missing.mp3');
   assert.equal(r.code, 1);
   assert.match(r.stderr, /^Error: The tab has no crash cymbals/);
+});
+
+test('cli: saved sync points survive moving the folder or the recording', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tabhop-'));
+  try {
+    const tab = join(dir, 'riff.txt');
+    writeFileSync(tab, readFileSync(DEMO, 'utf8'));
+    const used = /Sync: +bar 1 = 0:02\.000 \(from .*riff\.txt\.sync\.txt\)/;
+
+    // A relative path is relative to the sync file, not to where tabhop runs.
+    writeFileSync(`${tab}.sync.txt`, 'audio: song.mp3\n1 = 0:02\n');
+    const relative = run('info', tab);
+    assert.match(relative.stdout, used);
+    assert.ok(relative.stdout.includes(`Audio:    ${join(dir, 'song.mp3')} (bar 1 at 2.000s)`), relative.stdout);
+
+    // The recording moved: a file with the same name gets the points, with a note.
+    const gone = join(dir, 'gone', 'song.mp3');
+    writeFileSync(`${tab}.sync.txt`, `audio: ${gone}\n1 = 0:02\n`);
+    const moved = run('info', tab, '--audio', join(dir, 'song.mp3'));
+    assert.match(moved.stdout, used);
+    assert.ok(moved.stdout.includes(`${gone} isn't there anymore, so they're used for ${join(dir, 'song.mp3')} (same file name)`), moved.stdout);
+
+    // A different recording doesn't.
+    assert.match(run('info', tab, '--audio', join(dir, 'other.mp3')).stdout, /Not using .*sync\.txt: its sync points are for .*song\.mp3/);
+
+    // Moved, and no --audio: says how to point to it.
+    const missing = run('info', tab);
+    assert.ok(missing.stdout.includes(`${gone} isn't there anymore. Pass the recording with --audio <file>`), missing.stdout);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('cli: a broken sync file says how to get past it', () => {

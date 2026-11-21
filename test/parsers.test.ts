@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { nameChord } from '../src/chords.ts';
+import { nameChord, withDetectedChords } from '../src/chords.ts';
 import { assignFingers } from '../src/fingering.ts';
 import { loadSong } from '../src/load.ts';
 import { tuningLabel } from '../src/model.ts';
@@ -100,6 +100,28 @@ test('chord naming', () => {
   assert.equal(nameChord([45, 52, 57, 60, 64]), 'Am');
   assert.equal(nameChord([52, 55, 60]), 'C/E');
   assert.equal(nameChord([40]), null);
+});
+
+test('chords: bars the file names keep its names, the other bars get detected ones', () => {
+  // "Am" over an A5 shape stands for the file's own name winning over detection.
+  const song = parseAsciiTab(`bpm: 60
+   Am
+e|----------------|----------------|
+B|----------------|----------------|
+G|----------------|----------------|
+D|-7--------------|-5--------------|
+A|-7--------------|-5--------------|
+E|-5--------------|-3--------------|
+
+e|----------------|
+B|----------------|
+G|----------------|
+D|-2--------------|
+A|-2--------------|
+E|-0--------------|`);
+  assert.deepEqual(withDetectedChords(song).map((c) => [c.time, c.text]), [[0, 'Am'], [4, 'G5'], [8, 'E5']]);
+  // Without any names in the file, it's all detected.
+  assert.deepEqual(withDetectedChords({ ...song, chords: [] }).map((c) => c.text), ['A5', 'G5', 'E5']);
 });
 
 test('fingering: power chords use index on the root', () => {

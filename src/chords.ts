@@ -65,11 +65,26 @@ export function detectChords(song: Song): Marker[] {
     const name = nameChord(playable.map((n) => song.tuning[n.string] + n.fret));
     if (!name) continue;
     const t = group[0].time;
-    let bar = 0;
-    while (bar + 1 < song.bars.length && song.bars[bar + 1] <= t + 1e-6) bar++;
+    const bar = barIndex(song, t);
     if (name !== lastName || bar !== lastBar) out.push({ time: t, text: name });
     lastName = name;
     lastBar = bar;
   }
   return out;
+}
+
+/** 0-based bar that song time t falls in. */
+function barIndex(song: Song, t: number): number {
+  return Math.max(0, song.bars.findLastIndex((b) => b <= t + 1e-6));
+}
+
+/**
+ * The file's own chord names, plus detected ones in the bars it doesn't name.
+ * Files often name only some chords (one chord line in an ASCII tab, a few
+ * diagrams in a Guitar Pro file); where they do, their names win.
+ */
+export function withDetectedChords(song: Song): Marker[] {
+  const named = new Set(song.chords.map((c) => barIndex(song, c.time)));
+  const detected = detectChords(song).filter((c) => !named.has(barIndex(song, c.time)));
+  return [...song.chords, ...detected].sort((a, b) => a.time - b.time);
 }

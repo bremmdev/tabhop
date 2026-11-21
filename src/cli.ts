@@ -8,7 +8,7 @@ import { parseTime } from './parsers/asciiTab.ts';
 import { noteName, tuningLabel, type Song } from './model.ts';
 import { parseSyncPoints, syncToAudio, type SyncPoint, type SyncSegment } from './sync.ts';
 import { syncCommand } from './syncCommand.ts';
-import { clock, parseSyncFile, samePath, syncFilePath } from './syncFile.ts';
+import { clock, parseSyncFile, sameFileName, samePath, syncFilePath } from './syncFile.ts';
 import { NOTE_SHAPES, type NoteShape } from './render/renderer.ts';
 import { renderPng, renderVideo, stopRenders, type VideoOptions } from './video.ts';
 
@@ -173,13 +173,24 @@ function savedSync(): boolean {
   if (values['no-sync'] || values['audio-start'] !== undefined || !existsSync(path)) return false;
   let saved: ReturnType<typeof parseSyncFile>;
   try {
-    saved = parseSyncFile(readFileSync(path, 'utf8'));
+    saved = parseSyncFile(readFileSync(path, 'utf8'), path);
   } catch (e) {
     fail(`${path}: ${(e as Error).message}\n(Fix the file, or ignore it with --no-sync.)`);
   }
-  const audioPath = values.audio ?? song.audio?.path ?? saved.audio;
+  const given = values.audio ?? song.audio?.path;
+  const audioPath = given ?? saved.audio;
   if (!audioPath) return false;
-  if (saved.audio && !samePath(audioPath, saved.audio)) {
+  if (saved.audio && !existsSync(saved.audio)) {
+    if (!given) {
+      syncNote = `Note:     ${saved.audio} isn't there anymore. Pass the recording with --audio <file>, or fix the "audio:" line in ${path}`;
+    } else if (!samePath(given, saved.audio) && sameFileName(given, saved.audio)) {
+      // Moved or renamed folders shouldn't lose the sync points.
+      syncNote =
+        `Note:     ${saved.audio} isn't there anymore, so they're used for ${given} (same file name).\n` +
+        `          To make that stick, fix the "audio:" line in ${path}`;
+    }
+  }
+  if (saved.audio && !samePath(audioPath, saved.audio) && !syncNote) {
     syncNote = `Not using ${path}: its sync points are for ${saved.audio}`;
     return false;
   }
@@ -228,7 +239,7 @@ const hint = audioStartHint();
 
 /** What the sync points do, so a typo (or a half-time tab) is easy to spot. */
 function syncSummary(): string | undefined {
-  if (!syncPoints) return syncNote;
+  if (!syncPoints) return undefined;
   const from = syncFrom ? ` (from ${syncFrom})` : '';
   const big = (s: SyncSegment) => s.tempoFactor > 1.5 || s.tempoFactor < 0.67;
   const describe = (f: number) => `${(Math.abs(f - 1) * 100).toFixed(1)}% ${f >= 1 ? 'faster' : 'slower'}`;
@@ -250,7 +261,7 @@ function syncSummary(): string | undefined {
   }
   return lines.join('\n');
 }
-const sync = syncSummary();
+const sync = [syncSummary(), syncNote].filter(Boolean).join('\n') || undefined;
 
 if (values.bars) {
   const m = /^(\d+)\s*-\s*(\d+)$/.exec(values.bars);

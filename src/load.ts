@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { dirname, extname, resolve } from 'node:path';
-import { detectChords } from './chords.ts';
+import { withDetectedChords } from './chords.ts';
 import { assignFingers } from './fingering.ts';
 import type { Song } from './model.ts';
 import { parseAsciiTab } from './parsers/asciiTab.ts';
@@ -42,7 +42,7 @@ export function loadSong(path: string, opts: LoadOptions = {}): { song: Song; tr
   }
   if (song.notes.length === 0) throw new Error('The tab contains no notes');
   assignFingers(song.notes);
-  if (opts.autoChords !== false && song.chords.length === 0) song.chords = detectChords(song);
+  if (opts.autoChords !== false) song.chords = withDetectedChords(song);
   return { song, tracks };
 }
 

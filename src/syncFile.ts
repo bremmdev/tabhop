@@ -8,7 +8,7 @@
  *   2 = 0:00.062
  *   110 = 2:43.120   # a note
  */
-import { basename, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { parseTime } from './parsers/asciiTab.ts';
 import { parseSyncPoints, type SyncPoint } from './sync.ts';
 
@@ -28,7 +28,11 @@ export function clock(t: number): string {
   return `${sign}${Math.floor(a / 60)}:${(a % 60).toFixed(3).padStart(6, '0')}`;
 }
 
-export function parseSyncFile(text: string): SyncFile {
+/**
+ * Reads a sync file. With `path`, a relative "audio:" path is taken relative to
+ * the file's folder (as "audio:" in a text tab is relative to the tab).
+ */
+export function parseSyncFile(text: string, path?: string): SyncFile {
   let audio: string | undefined;
   const parts: string[] = [];
   text.split(/\r?\n/).forEach((raw, i) => {
@@ -48,16 +52,33 @@ export function parseSyncFile(text: string): SyncFile {
     } else throw new Error(`Line ${i + 1}: expected "bar = time" or "audio: <file>", got "${line}"`);
   });
   if (!parts.length) throw new Error('No sync points in the file');
+  if (audio && path) audio = resolve(dirname(path), audio);
   return { ...(audio ? { audio } : {}), points: parseSyncPoints(parts.join(',')) };
 }
 
-export function formatSyncFile(tabPath: string, audio: string, points: SyncPoint[], notes = new Map<number, string>()): string {
+/**
+ * The recording as written in a sync file at `syncPath`: relative to it when the
+ * recording is in that folder or below (so the folder can move as a whole),
+ * otherwise the full path (a music folder elsewhere stays put when the tabs move).
+ */
+function audioForFile(syncPath: string, audio: string): string {
+  const full = resolve(audio);
+  const rel = relative(dirname(resolve(syncPath)), full);
+  const inside = rel !== '' && !isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`);
+  return inside ? rel.split(sep).join('/') : full;
+}
+
+export function formatSyncFile(
+  file: { path: string; tab: string; audio: string },
+  points: SyncPoint[],
+  notes = new Map<number, string>(),
+): string {
   const lines = [
-    `# Sync points for ${basename(tabPath)}, made by "tabhop sync".`,
+    `# Sync points for ${basename(file.tab)}, made by "tabhop sync".`,
     '# Each line is: bar = time in the recording (a fraction is a position in the bar).',
     '# Fix or add points by hand if you like. render, info and frame use this file',
     '# whenever they play the recording below; --no-sync ignores it.',
-    `audio: ${resolve(audio)}`,
+    `audio: ${audioForFile(file.path, file.audio)}`,
     '',
     ...points.map((p) => {
       const line = `${p.bar} = ${clock(p.time)}`;
@@ -71,5 +92,11 @@ export function formatSyncFile(tabPath: string, audio: string, points: SyncPoint
 /** Whether two paths name the same file (case-insensitive on Windows). */
 export function samePath(a: string, b: string): boolean {
   const [x, y] = [resolve(a), resolve(b)];
+  return process.platform === 'win32' ? x.toLowerCase() === y.toLowerCase() : x === y;
+}
+
+/** Whether two paths end in the same file name (case-insensitive on Windows). */
+export function sameFileName(a: string, b: string): boolean {
+  const [x, y] = [basename(a), basename(b)];
   return process.platform === 'win32' ? x.toLowerCase() === y.toLowerCase() : x === y;
 }

@@ -84,6 +84,6 @@ export async function syncCommand(song: Song, opts: SyncCommandOptions): Promise
   const path = opts.out ?? syncFilePath(opts.tabPath);
   // Keep the previous file (maybe edited by hand) rather than losing it.
   if (existsSync(path)) renameSync(path, `${path}.bak`);
-  writeFileSync(path, formatSyncFile(opts.tabPath, opts.audioPath, result.points, notes));
+  writeFileSync(path, formatSyncFile({ path, tab: opts.tabPath, audio: opts.audioPath }, result.points, notes));
   return formatReport(result, opts.tabPath, opts.audioPath, path);
 }

@@ -102,6 +102,8 @@ node src/cli.ts sync song.gp4 --audio song.mp3 --sync "110=2:43.12"
 
 You can also edit the `.sync.txt` file directly. Running `sync` again keeps the old file as `.sync.txt.bak`.
 
+The file remembers the recording. A recording in the tab's folder (or a folder inside it) is saved relative to the tab, so you can move the whole folder. A recording anywhere else is saved with its full path. If the recording itself moves, pass the new location with `--audio`: a file with the same name still gets the sync points.
+
 It needs crashes in the tab and audible cymbals in the recording. Tabs without a drum track (ASCII tabs, guitar-only excerpts) can't be synced automatically: use `--audio-start`, or pick a few points by ear as below.
 
 #### By hand
@@ -157,7 +159,7 @@ E|-0---0-0-0---0--|-3--------------|  x2
 - **`grid: 4`** switches to grid timing: every 4 characters is one beat and bar lines don't affect timing. Use it for tabs with perfectly regular spacing.
 - `bpm:` (or `tempo:`) / `time:` lines between systems change the tempo or time signature from that point on.
 - Comments: a line starting with `#` or `//` is ignored, and so is ` # …` or ` // …` at the end of a header line. The `#` needs a space on both sides, so sharps (`C#`) and file names (`song#2.mp3`) still work.
-- `[Section]` lines become section labels. A chord line directly above a system becomes chord names; without one, chord names are detected automatically.
+- `[Section]` lines become section labels. A chord line directly above a system becomes chord names. Bars without a chord name get one detected from the notes (in Guitar Pro files too), unless you pass `--no-chords`.
 - `x2` / `(x4)` after a system repeats it.
 - `PM----` lines above or below a system mark palm mutes.
 - Techniques: `h` hammer-on, `p` pull-off, `/ \ s` slide, `b` bend (`7b9` = whole step, `7b` = full, `7b9r7` = bend and release), `~` or `v` vibrato, `x` dead note, `<12>` or `[12]` harmonic, `t` tap.

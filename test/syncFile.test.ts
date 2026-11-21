@@ -5,12 +5,23 @@ import { clock, formatSyncFile, parseSyncFile, samePath, syncFilePath } from '..
 
 test('sync file: written and read back', () => {
   const points = [{ bar: 2, time: 0.062 }, { bar: 27.25, time: 39.107 }, { bar: 110, time: 163.12 }];
-  const text = formatSyncFile('tabs/song.gp4', 'music/song.mp3', points, new Map([[110, 'check: after the break']]));
+  const text = formatSyncFile({ path: 'tabs/song.gp4.sync.txt', tab: 'tabs/song.gp4', audio: 'music/song.mp3' }, points, new Map([[110, 'check: after the break']]));
   assert.match(text, /^# Sync points for song\.gp4/);
   assert.match(text, /^110 = 2:43\.120 +# check: after the break$/m);
   const back = parseSyncFile(text);
   assert.deepEqual(back.points, points);
   assert.equal(back.audio, resolve('music/song.mp3'));
+});
+
+test('sync file: a recording in the tab folder is saved relative to it, so the folder can move', () => {
+  const points = [{ bar: 1, time: 0 }];
+  const text = formatSyncFile({ path: 'tabs/song.gp4.sync.txt', tab: 'tabs/song.gp4', audio: 'tabs/audio/song.mp3' }, points);
+  assert.match(text, /^audio: audio\/song\.mp3$/m);
+  assert.equal(parseSyncFile(text, 'tabs/song.gp4.sync.txt').audio, resolve('tabs/audio/song.mp3'));
+  assert.equal(parseSyncFile(text, 'moved/song.gp4.sync.txt').audio, resolve('moved/audio/song.mp3'));
+  // Anywhere else (a music folder, another drive), the full path: it stays right when the tabs move.
+  const elsewhere = formatSyncFile({ path: 'tabs/song.gp4.sync.txt', tab: 'tabs/song.gp4', audio: 'music/song.mp3' }, points);
+  assert.ok(elsewhere.split('\n').includes(`audio: ${resolve('music/song.mp3')}`), elsewhere);
 });
 
 test('sync file: hand-written, with comments and in any order', () => {
