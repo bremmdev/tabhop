@@ -19,6 +19,7 @@ export const OPTIONS = {
   sync: { type: 'string' },
   'no-sync': { type: 'boolean', default: false },
   'no-audio': { type: 'boolean', default: false },
+  sound: { type: 'string', default: 'tab' },
   at: { type: 'string' },
   help: { type: 'boolean', short: 'h' },
 } as const;

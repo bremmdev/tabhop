@@ -10,7 +10,7 @@ import { parseSyncPoints, syncToAudio, type SyncPoint, type SyncSegment } from '
 import { syncCommand } from './syncCommand.ts';
 import { clock, parseSyncFile, sameFileName, samePath, syncFilePath } from './syncFile.ts';
 import { NOTE_SHAPES, type NoteShape } from './render/renderer.ts';
-import { renderPng, renderVideo, stopRenders, type VideoOptions } from './video.ts';
+import { renderPng, renderVideo, SOUNDS, stopRenders, type Sound, type VideoOptions } from './video.ts';
 
 const HELP = `tabhop — turn a guitar tab into a scrolling practice video
 
@@ -48,7 +48,9 @@ Options:
                         the tab is stretched between them to follow the band's tempo.
                         (sync) Points you already know; the rest are fitted around them
       --no-sync         Ignore the saved sync points in <tab-file>.sync.txt
-      --no-audio       Ignore the audio set in the tab file
+      --no-audio        Ignore the audio set in the tab file
+      --sound <s>       Without a backing track: tab (the tab played on a synth),
+                        click (a metronome) or none (a silent video)         [tab]
       --at <sec>        (frame) Song time in seconds to render
 `;
 
@@ -275,6 +277,8 @@ if (values.bars) {
 
 const noteShape = values['note-shape'] as NoteShape;
 if (!NOTE_SHAPES.includes(noteShape)) fail(`--note-shape must be one of: ${NOTE_SHAPES.join(', ')}`);
+const sound = values.sound as Sound;
+if (!SOUNDS.includes(sound)) fail(`--sound must be one of: ${SOUNDS.join(', ')}`);
 
 const baseOpts: Omit<VideoOptions, 'speed'> = {
   fps,
@@ -285,6 +289,7 @@ const baseOpts: Omit<VideoOptions, 'speed'> = {
   crf,
   encoder: values.encoder,
   noteShape,
+  sound,
 };
 
 function safeName(s: string): string {
@@ -323,6 +328,10 @@ if (command === 'info') {
   const workers = workerCount ?? Math.max(1, Math.min(8, Math.floor(availableParallelism() / 3)));
   if (hint) console.warn(`Note: ${hint}\n`);
   if (sync) console.log(`${sync}\n`);
+  if (!song.audio && sound !== 'none') {
+    const what = sound === 'tab' ? 'the tab played on a synth, after a clicked count-in' : 'a metronome click on every beat';
+    console.log(`Sound:    ${what} (no backing track; --sound tab, click or none)\n`);
+  }
   // Ctrl-C: stop cleanly instead of leaving half-written files behind. A second Ctrl-C quits at once.
   let stopping: Promise<never> | undefined;
   const stop = () => {

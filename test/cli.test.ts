@@ -118,6 +118,52 @@ test('cli: a finished render replaces the previous video', { skip: !hasFfmpeg &&
   }
 });
 
+/** The audio of a video as mono samples at `rate`, or undefined if it has none. */
+function decodeAudio(video: string, rate = 48000): Float32Array | undefined {
+  const r = spawnSync('ffmpeg', ['-v', 'error', '-i', video, '-map', '0:a?', '-f', 'f32le', '-ac', '1', '-ar', String(rate), '-'], { maxBuffer: 2 ** 28 });
+  if (!r.stdout?.length) return undefined;
+  return new Float32Array(r.stdout.buffer.slice(r.stdout.byteOffset, r.stdout.byteOffset + (r.stdout.length & ~3)));
+}
+
+test('cli: without a recording the video plays the tab on a synth, after a clicked count-in', { skip: !hasFfmpeg && 'needs ffmpeg' }, () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tabhop-'));
+  const loudest = (a: Float32Array, from: number, to: number) => Math.max(...a.subarray(from * 48000, to * 48000).map(Math.abs));
+  try {
+    // demo-riff is 100 bpm: the count-in starts 4 beats (2.4 s) before bar 1 and the video 0.6 s before that.
+    for (const [speed, firstClick] of [['100', 0.6], ['50', 1.2]] as const) {
+      const out = join(dir, `${speed}.mp4`);
+      const r = run('render', DEMO, '--bars', '1-1', '--size', '320x180', '--speed', speed, '-o', out);
+      assert.equal(r.code, 0, r.stderr);
+      assert.match(r.stdout, /Sound: +the tab played on a synth/);
+      const audio = decodeAudio(out);
+      assert.ok(audio, 'the video has sound');
+      const onset = audio.findIndex((x) => Math.abs(x) > 0.05) / 48000;
+      assert.ok(Math.abs(onset - firstClick) < 0.005, `first click at ${onset} s, expected ${firstClick} s (${speed}%)`);
+      const bar1 = firstClick * 5;
+      assert.ok(loudest(audio, bar1, bar1 + 0.3) > 0.1, `the riff plays from bar 1 (${bar1} s)`);
+    }
+    const click = join(dir, 'click.mp4');
+    let r = run('render', DEMO, '--bars', '1-1', '--size', '320x180', '--sound', 'click', '-o', click);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /Sound: +a metronome click on every beat/);
+    // Bar 1 starts at 3 s; a click lasts well under a beat (0.6 s), a note of the riff would fill it.
+    assert.ok(loudest(decodeAudio(click)!, 3, 3.05) > 0.1, 'a click on bar 1');
+    assert.ok(loudest(decodeAudio(click)!, 3.2, 3.55) < 0.01, 'and quiet until the next beat');
+
+    const silent = join(dir, 'silent.mp4');
+    r = run('render', DEMO, '--bars', '1-1', '--size', '320x180', '--sound', 'none', '-o', silent);
+    assert.equal(r.code, 0, r.stderr);
+    assert.doesNotMatch(r.stdout, /Sound:/);
+    assert.equal(decodeAudio(silent), undefined, '--sound none: no sound');
+
+    r = run('render', DEMO, '--sound', 'piano', '-o', join(dir, 'x.mp4'));
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /--sound must be one of: tab, click, none/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('cli: frame --at takes seconds or m:ss', () => {
   const dir = mkdtempSync(join(tmpdir(), 'tabhop-'));
   try {

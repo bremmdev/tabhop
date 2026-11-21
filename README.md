@@ -56,8 +56,13 @@ The files in `examples/` are generic exercises built from textbook patterns (pow
 | `--sync` | | Pin bars to times in the recording, e.g. `2=0.06,110=2:43.1`, for recordings that don't follow the tab's tempo (see below) |
 | `--no-sync` | | Ignore the sync points saved by `sync` |
 | `--no-audio` | | Ignore the audio set in the tab file |
+| `--sound` | `tab` | Without a backing track: `tab` plays the tab on a synth, `click` a metronome, `none` makes a silent video |
 
 ## Backing track
+
+Without a recording, the video plays the tab itself: every note at its pitch and chords as chords, in the buzzy voice of a pocket stylus synth. Bends, slides, hammer-ons and pull-offs, vibrato, palm mutes, dead notes and harmonics all sound the part. The count-in is clicked, with the first beat accented. It follows the video's speed, so a 70% video plays at 70% of the tempo, at the same pitch.
+
+`--sound click` gives a metronome click on every beat instead (the first beat of each bar accented), and `--sound none` a silent video.
 
 ```sh
 node src/cli.ts render riff.txt --audio "song.mp3" --audio-start 0:58.76 --speed 100,80

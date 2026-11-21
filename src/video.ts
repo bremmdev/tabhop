@@ -4,9 +4,14 @@ import { once } from 'node:events';
 import { existsSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import { Worker } from 'node:worker_threads';
+import { CLICK_SAMPLE_RATE, clickTimes, clickTrack } from './click.ts';
+import { tabTrack } from './synth.ts';
 import { buildTimeline, makeGeometry } from './layout.ts';
 import type { Song } from './model.ts';
 import { Renderer, type NoteShape } from './render/renderer.ts';
+
+export const SOUNDS = ['tab', 'click', 'none'] as const;
+export type Sound = (typeof SOUNDS)[number];
 
 export interface VideoOptions {
   speed: number; // 1 = 100%
@@ -18,6 +23,8 @@ export interface VideoOptions {
   crf: number;
   encoder: string; // e.g. libx264, h264_nvenc
   noteShape?: NoteShape;
+  /** What to play when there's no backing track: the tab on a synth, a metronome click, or nothing (the default). */
+  sound?: Sound;
 }
 
 /**
@@ -152,7 +159,8 @@ export async function renderFrames(
 }
 
 /**
- * Renders the whole video, then adds the backing track if the song has one.
+ * Renders the whole video, then adds the backing track if the song has one,
+ * or else the generated sound `opts.sound` asks for.
  * It's made under a temporary name and only replaces `outPath` once finished,
  * so an interrupted render never leaves a broken video (or deletes a good one).
  */
@@ -166,12 +174,12 @@ export async function renderVideo(
   if (song.audio && !existsSync(song.audio.path)) throw new Error(`Audio file not found: ${song.audio.path}`);
   const partial = tempFile(`${outPath}.partial.mp4`);
   try {
-    if (!song.audio) await renderSilentVideo(song, opts, partial, workers, onProgress);
+    if (!song.audio && (opts.sound ?? 'none') === 'none') await renderSilentVideo(song, opts, partial, workers, onProgress);
     else {
       const silent = tempFile(`${outPath}.video.mp4`);
       try {
         await renderSilentVideo(song, opts, silent, workers, onProgress);
-        await muxAudio(song, opts, silent, partial);
+        await (song.audio ? muxAudio : muxSynth)(song, opts, silent, partial);
       } finally {
         removeTemp(silent);
       }
@@ -184,6 +192,36 @@ export async function renderVideo(
   } finally {
     removeTemp(partial);
   }
+}
+
+/** Adds the tab played on a synth (synth.ts) or a metronome click (click.ts), generated to fit the video exactly. */
+async function muxSynth(song: Song, opts: VideoOptions, videoPath: string, outPath: string): Promise<void> {
+  const { tl, videoDuration } = prepare(song, opts);
+  const samples =
+    opts.sound === 'click' ? clickTrack(clickTimes(song, tl, opts.speed), videoDuration) : tabTrack(song, tl, opts.speed);
+  const ff = tracked(
+    spawn(
+      'ffmpeg',
+      [
+        '-hide_banner', '-loglevel', 'error', '-y',
+        '-i', videoPath,
+        '-f', 'f32le', '-ar', String(CLICK_SAMPLE_RATE), '-ac', '1', '-i', '-',
+        '-map', '0:v', '-map', '1:a',
+        '-c:v', 'copy', '-c:a', 'aac', '-b:a', '128k',
+        '-t', videoDuration.toFixed(3),
+        '-movflags', '+faststart',
+        outPath,
+      ],
+      { stdio: ['pipe', 'ignore', 'pipe'] },
+    ),
+  );
+  let stderr = '';
+  ff.stderr.on('data', (d) => (stderr += d));
+  // If ffmpeg fails before reading it all, the write fails too; the exit code says why.
+  ff.stdin.on('error', () => {});
+  ff.stdin.end(Buffer.from(samples.buffer, samples.byteOffset, samples.byteLength));
+  const [code] = await once(ff, 'close');
+  if (code !== 0) throw new Error(`Adding the ${opts.sound === 'click' ? 'click track' : 'synth track'} failed:\n${stderr}`);
 }
 
 /** atempo only accepts 0.5–2.0 per instance, so chain it for larger changes. */
